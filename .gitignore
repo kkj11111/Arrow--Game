@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# 环境与编辑器
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store
