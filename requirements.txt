@@ -1,0 +1,2 @@
+# Python 3.14 上官方 pygame 尚无预编译安装包，请使用接口兼容的社区版 pygame-ce
+pygame-ce>=2.5.8
