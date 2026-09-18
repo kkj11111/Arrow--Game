@@ -37,21 +37,35 @@ FPS = 60
 TOP_BAR_HEIGHT = 104          # 游戏界面顶部信息栏高度
 
 # 颜色
-COLOR_BG = (246, 243, 232)
-COLOR_PANEL = (235, 230, 214)
-COLOR_GRID_LINE = (196, 190, 172)
-COLOR_CELL = (255, 252, 242)
-COLOR_CELL_HOVER = (255, 244, 205)
-COLOR_ARROW = (52, 84, 148)
-COLOR_ARROW_HOVER = (36, 62, 116)
-COLOR_ARROW_HIT = (204, 60, 48)
+COLOR_SKY_TOP = (208, 230, 246)      # 背景渐变：顶部浅蓝
+COLOR_SKY_BOTTOM = (246, 243, 232)   # 背景渐变：底部米色
+COLOR_PANEL = (255, 255, 255)        # 卡片底色
+COLOR_PANEL_BORDER = (198, 210, 220) # 卡片描边
+COLOR_SHADOW = (182, 196, 210)       # 卡片阴影
+COLOR_GRID_LINE = (212, 219, 228)
+COLOR_CELL_A = (255, 255, 255)
+COLOR_CELL_B = (238, 244, 250)
+COLOR_CELL_HOVER = (255, 246, 214)
+
+# 四方向箭头配色
+COLOR_ARROW_UP = (52, 168, 120)      # 绿
+COLOR_ARROW_RIGHT = (240, 148, 52)   # 橙
+COLOR_ARROW_DOWN = (128, 98, 196)    # 紫
+COLOR_ARROW_LEFT = (46, 152, 196)    # 青
+COLOR_ARROW_HIT = (222, 74, 62)      # 碰撞红
+
 COLOR_TEXT = (60, 56, 48)
 COLOR_TEXT_LIGHT = (255, 255, 255)
-COLOR_BUTTON = (98, 126, 172)
-COLOR_BUTTON_HOVER = (122, 150, 196)
-COLOR_RED = (204, 60, 48)
-COLOR_GOLD = (200, 156, 56)
-COLOR_HINT = (230, 170, 40)
+COLOR_GOLD = (210, 158, 40)
+COLOR_HINT = (240, 180, 48)          # 提示光圈
+
+# 按钮配色
+COLOR_BTN_BLUE = (84, 136, 206)
+COLOR_BTN_GREEN = (56, 166, 116)
+COLOR_BTN_PURPLE = (140, 108, 200)
+COLOR_BTN_GOLD = (224, 168, 56)
+COLOR_BTN_GRAY = (152, 160, 172)
+COLOR_BTN_RED = (222, 92, 78)
 
 # 动画参数
 FLY_STEP = 16
@@ -122,7 +136,54 @@ def _make_win_sound() -> "pygame.mixer.Sound":
 
 
 # ---------------------------------------------------------------------------
-# 绘制：用几何图形画箭头（头部 + 箭杆 + 尾翼）
+# 绘制辅助：颜色 / 卡片 / 徽章
+# ---------------------------------------------------------------------------
+
+
+def lighten(color, amount=26):
+    """把颜色调亮，用于悬停效果。"""
+    return tuple(min(255, c + amount) for c in color)
+
+
+def arrow_color(direction):
+    """每个方向一种颜色，方便玩家一眼区分方向。"""
+    return {
+        Direction.UP: COLOR_ARROW_UP,
+        Direction.RIGHT: COLOR_ARROW_RIGHT,
+        Direction.DOWN: COLOR_ARROW_DOWN,
+        Direction.LEFT: COLOR_ARROW_LEFT,
+    }[direction]
+
+
+def make_vertical_gradient(top, bottom, width, height):
+    """生成一张自上而下渐变的 surface（顶部浅蓝 -> 底部米色）。"""
+    surf = pygame.Surface((width, height))
+    for y in range(height):
+        t = y / max(1, height - 1)
+        color = tuple(int(a + (b - a) * t) for a, b in zip(top, bottom))
+        pygame.draw.line(surf, color, (0, y), (width, y))
+    return surf
+
+
+def draw_card(surface, rect, radius=14, shadow=True):
+    """白色圆角卡片（带浅色阴影与描边）。"""
+    r = pygame.Rect(rect)
+    if shadow:
+        pygame.draw.rect(surface, COLOR_SHADOW, r.move(3, 4), border_radius=radius)
+    pygame.draw.rect(surface, COLOR_PANEL, r, border_radius=radius)
+    pygame.draw.rect(surface, COLOR_PANEL_BORDER, r, 2, border_radius=radius)
+
+
+def draw_badge(surface, rect, text, font, bg):
+    """彩色圆角信息徽章（剩余箭头 / 失误 / 用时）。"""
+    rect = pygame.Rect(rect)
+    pygame.draw.rect(surface, bg, rect, border_radius=9)
+    img = font.render(text, True, COLOR_TEXT_LIGHT)
+    surface.blit(img, img.get_rect(center=rect.center))
+
+
+# ---------------------------------------------------------------------------
+# 绘制：用几何图形画箭头（头部 + 箭杆）
 # ---------------------------------------------------------------------------
 
 
@@ -130,49 +191,30 @@ def draw_arrow(surface, cx: float, cy: float, size: float,
                direction: Direction, color) -> None:
     """以 (cx, cy) 为中心绘制一个 size 大小的箭头。
 
-    造型：头部三角形 + 贯穿的箭杆 + 尾翼两条斜线，四个方向分别计算坐标。
+    造型：头部三角形 + 贯穿的箭杆，四个方向分别计算坐标。
     """
     s = size
     shaft_w = max(2, int(s * 0.14))
-    wing_w = max(2, int(s * 0.10))
 
     if direction == Direction.RIGHT:
         tip = (cx + 0.50 * s, cy)
         base = ((cx + 0.10 * s, cy - 0.30 * s), (cx + 0.10 * s, cy + 0.30 * s))
         shaft = ((cx + 0.10 * s, cy), (cx - 0.48 * s, cy))
-        wings = [
-            ((cx - 0.48 * s, cy - 0.10 * s), (cx - 0.64 * s, cy - 0.26 * s)),
-            ((cx - 0.48 * s, cy + 0.10 * s), (cx - 0.64 * s, cy + 0.26 * s)),
-        ]
     elif direction == Direction.LEFT:
         tip = (cx - 0.50 * s, cy)
         base = ((cx - 0.10 * s, cy - 0.30 * s), (cx - 0.10 * s, cy + 0.30 * s))
         shaft = ((cx - 0.10 * s, cy), (cx + 0.48 * s, cy))
-        wings = [
-            ((cx + 0.48 * s, cy - 0.10 * s), (cx + 0.64 * s, cy - 0.26 * s)),
-            ((cx + 0.48 * s, cy + 0.10 * s), (cx + 0.64 * s, cy + 0.26 * s)),
-        ]
     elif direction == Direction.UP:
         tip = (cx, cy - 0.50 * s)
         base = ((cx - 0.30 * s, cy - 0.10 * s), (cx + 0.30 * s, cy - 0.10 * s))
         shaft = ((cx, cy - 0.10 * s), (cx, cy + 0.48 * s))
-        wings = [
-            ((cx - 0.10 * s, cy + 0.48 * s), (cx - 0.26 * s, cy + 0.64 * s)),
-            ((cx + 0.10 * s, cy + 0.48 * s), (cx + 0.26 * s, cy + 0.64 * s)),
-        ]
     else:  # DOWN
         tip = (cx, cy + 0.50 * s)
         base = ((cx - 0.30 * s, cy + 0.10 * s), (cx + 0.30 * s, cy + 0.10 * s))
         shaft = ((cx, cy + 0.10 * s), (cx, cy - 0.48 * s))
-        wings = [
-            ((cx - 0.10 * s, cy - 0.48 * s), (cx - 0.26 * s, cy - 0.64 * s)),
-            ((cx + 0.10 * s, cy - 0.48 * s), (cx + 0.26 * s, cy - 0.64 * s)),
-        ]
 
     pygame.draw.polygon(surface, color, [tip, base[0], base[1]])
     pygame.draw.line(surface, color, shaft[0], shaft[1], shaft_w)
-    for w in wings:
-        pygame.draw.line(surface, color, w[0], w[1], wing_w)
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +223,7 @@ def draw_arrow(surface, cx: float, cy: float, size: float,
 
 
 class Button:
-    def __init__(self, rect, text, font, bg=COLOR_BUTTON, fg=COLOR_TEXT_LIGHT):
+    def __init__(self, rect, text, font, bg=COLOR_BTN_BLUE, fg=COLOR_TEXT_LIGHT):
         self.rect = pygame.Rect(rect)
         self.text = text
         self.font = font
@@ -190,9 +232,9 @@ class Button:
 
     def draw(self, surface):
         hover = self.rect.collidepoint(pygame.mouse.get_pos())
-        color = COLOR_BUTTON_HOVER if hover else self.bg
+        color = lighten(self.bg, 26) if hover else self.bg
         pygame.draw.rect(surface, color, self.rect, border_radius=10)
-        pygame.draw.rect(surface, COLOR_TEXT, self.rect, 2, border_radius=10)
+        pygame.draw.rect(surface, (255, 255, 255), self.rect, 2, border_radius=10)
         label = self.font.render(self.text, True, self.fg)
         surface.blit(label, label.get_rect(center=self.rect.center))
 
@@ -223,7 +265,8 @@ class FlyAnimation:
             self.dead = True
 
     def draw(self, surface, size):
-        draw_arrow(surface, self.x, self.y, size, self.arrow.direction, COLOR_ARROW)
+        draw_arrow(surface, self.x, self.y, size, self.arrow.direction,
+                   arrow_color(self.arrow.direction))
 
 
 class ShakeAnimation:
@@ -266,6 +309,8 @@ class Game:
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("一箭又一箭")
         self.clock = pygame.time.Clock()
+        self.background = make_vertical_gradient(
+            COLOR_SKY_TOP, COLOR_SKY_BOTTOM, SCREEN_WIDTH, SCREEN_HEIGHT)
 
         self.font_title = get_font(56)
         self.font_big = get_font(44)
@@ -302,19 +347,23 @@ class Game:
         self.auto_idx = 0
         self.auto_timer = 0
 
-        # 按钮（预创建，矩形位置固定）
+        # 按钮（预创建，矩形位置固定，各功能不同颜色）
         self.btn_start = Button((SCREEN_WIDTH // 2 - 110, 420, 220, 56),
-                                "开始游戏", self.font_mid)
+                                "开始游戏", self.font_mid, bg=COLOR_BTN_BLUE)
         self.btn_random = Button((SCREEN_WIDTH // 2 - 110, 486, 220, 44),
-                                 "随机挑战", self.font_small)
-        self.btn_hint = Button((398, 16, 74, 40), "提示", self.font_tiny)
-        self.btn_undo = Button((478, 16, 74, 40), "撤销", self.font_tiny)
-        self.btn_auto = Button((558, 16, 100, 40), "自动求解", self.font_tiny)
-        self.btn_restart = Button((664, 16, 112, 40), "重新开始", self.font_tiny)
-        self.btn_next = Button((SCREEN_WIDTH // 2 - 100, 470, 200, 56),
-                               "下一关", self.font_mid)
-        self.btn_retry = Button((SCREEN_WIDTH // 2 - 100, 440, 200, 56),
-                                "重新开始", self.font_mid)
+                                 "随机挑战", self.font_small, bg=COLOR_BTN_PURPLE)
+        self.btn_hint = Button((470, 20, 66, 38), "提示", self.font_tiny,
+                               bg=COLOR_BTN_GOLD)
+        self.btn_undo = Button((542, 20, 66, 38), "撤销", self.font_tiny,
+                               bg=COLOR_BTN_GRAY)
+        self.btn_auto = Button((614, 20, 92, 38), "自动求解", self.font_tiny,
+                               bg=COLOR_BTN_GREEN)
+        self.btn_restart = Button((712, 20, 80, 38), "重新开始", self.font_tiny,
+                                  bg=COLOR_BTN_RED)
+        self.btn_next = Button((SCREEN_WIDTH // 2 - 100, 440, 200, 56),
+                               "下一关", self.font_mid, bg=COLOR_BTN_BLUE)
+        self.btn_retry = Button((SCREEN_WIDTH // 2 - 100, 410, 200, 56),
+                                "重新开始", self.font_mid, bg=COLOR_BTN_RED)
 
         # 棋盘布局（进入关卡时计算）
         self.cell = 88
@@ -556,7 +605,7 @@ class Game:
     # ---------------- 绘制 ----------------
 
     def draw(self) -> None:
-        self.screen.fill(COLOR_BG)
+        self.screen.blit(self.background, (0, 0))
         if self.state == "start":
             self._draw_start()
         elif self.state == "playing":
@@ -568,24 +617,31 @@ class Game:
         pygame.display.flip()
 
     def _draw_start(self) -> None:
-        title = self.font_title.render("一箭又一箭", True, COLOR_TEXT)
+        # 标题（阴影立体感）
+        title = self.font_title.render("一箭又一箭", True, COLOR_SHADOW)
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2 + 3, 153)))
+        title = self.font_title.render("一箭又一箭", True, (58, 66, 92))
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 150)))
 
-        # 装饰箭头
-        draw_arrow(self.screen, SCREEN_WIDTH // 2 - 150, 222, 46, Direction.RIGHT, COLOR_ARROW)
-        draw_arrow(self.screen, SCREEN_WIDTH // 2 - 96, 222, 46, Direction.UP, COLOR_ARROW)
-        draw_arrow(self.screen, SCREEN_WIDTH // 2 + 96, 222, 46, Direction.DOWN, COLOR_ARROW)
-        draw_arrow(self.screen, SCREEN_WIDTH // 2 + 150, 222, 46, Direction.LEFT, COLOR_ARROW)
+        # 装饰箭头（四个方向四种颜色）
+        decor = [(SCREEN_WIDTH // 2 - 150, Direction.RIGHT),
+                 (SCREEN_WIDTH // 2 - 96, Direction.UP),
+                 (SCREEN_WIDTH // 2 + 96, Direction.DOWN),
+                 (SCREEN_WIDTH // 2 + 150, Direction.LEFT)]
+        for x, d in decor:
+            draw_arrow(self.screen, x, 222, 46, d, arrow_color(d))
 
         sub = self.font_mid.render("点击箭头，让它们依次飞出棋盘！", True, COLOR_TEXT)
         self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 280)))
 
+        # 规则卡片
+        draw_card(self.screen, (120, 310, 560, 128), radius=14)
         rules = [
             "箭头会沿朝向直线飞向棋盘边缘；",
             "前方有其他箭头阻挡时无法飞出，并消耗一次失误（每关 3 次）；",
             "按正确顺序清空全部箭头即可通关，还有三星评价等你挑战！",
         ]
-        y = 330
+        y = 340
         for line in rules:
             text = self.font_small.render(line, True, COLOR_TEXT)
             self.screen.blit(text, text.get_rect(center=(SCREEN_WIDTH // 2, y)))
@@ -594,44 +650,47 @@ class Game:
         self.btn_start.draw(self.screen)
         self.btn_random.draw(self.screen)
 
-        # 历史成绩
+        # 历史成绩（小卡片）
         data = load_save()
         total_stars = sum(data["stars"].values())
         best = sum(data["best"].values())
         info = self.font_tiny.render(
             f"历史成绩：共 {total_stars} 星 · 最高总分 {best}", True, COLOR_TEXT)
-        self.screen.blit(info, info.get_rect(center=(SCREEN_WIDTH // 2, 560)))
+        info_rect = info.get_rect(center=(SCREEN_WIDTH // 2, 560))
+        draw_card(self.screen, info_rect.inflate(44, 18), radius=10)
+        self.screen.blit(info, info_rect)
 
     def _draw_playing(self) -> None:
-        pygame.draw.rect(self.screen, COLOR_PANEL, (0, 0, SCREEN_WIDTH, TOP_BAR_HEIGHT))
-        pygame.draw.line(self.screen, COLOR_GRID_LINE, (0, TOP_BAR_HEIGHT),
-                         (SCREEN_WIDTH, TOP_BAR_HEIGHT), 2)
-
         session = self.session
+        # 顶部信息卡片
+        draw_card(self.screen, (12, 10, SCREEN_WIDTH - 24, TOP_BAR_HEIGHT - 20),
+                  radius=14)
+
         name = self.font_mid.render(f"关卡：{session.name}", True, COLOR_TEXT)
-        self.screen.blit(name, (24, 14))
+        self.screen.blit(name, name.get_rect(midleft=(28, 26)))
 
-        remain = self.font_small.render(f"剩余箭头：{session.remaining}", True, COLOR_TEXT)
-        self.screen.blit(remain, (24, 58))
-        mist_color = COLOR_RED if session.mistakes >= session.max_mistakes else COLOR_TEXT
-        mist = self.font_small.render(
-            f"失误：{session.mistakes} / {session.max_mistakes}", True, mist_color)
-        self.screen.blit(mist, mist.get_rect(midleft=(170, 66)))
+        # 信息徽章（彩色圆角）
+        draw_badge(self.screen, (28, 56, 140, 34),
+                   f"剩余箭头：{session.remaining}", self.font_tiny, COLOR_BTN_BLUE)
+        mist_bg = COLOR_BTN_RED if session.mistakes > 0 else COLOR_BTN_GRAY
+        draw_badge(self.screen, (178, 56, 116, 34),
+                   f"失误：{session.mistakes}/{session.max_mistakes}",
+                   self.font_tiny, mist_bg)
         mm, ss = divmod(session.elapsed, 60)
-        timer = self.font_small.render(f"用时：{mm:02d}:{ss:02d}", True, COLOR_TEXT)
-        self.screen.blit(timer, timer.get_rect(midleft=(300, 66)))
+        draw_badge(self.screen, (304, 56, 128, 34), f"用时：{mm:02d}:{ss:02d}",
+                   self.font_tiny, COLOR_BTN_GREEN)
 
-        # 按钮
+        # 功能按钮
         self.btn_hint.draw(self.screen)
         self.btn_undo.draw(self.screen)
         self.btn_auto.text = "停止演示" if self.auto_solving else "自动求解"
         self.btn_auto.draw(self.screen)
         self.btn_restart.draw(self.screen)
         if self.auto_solving:
-            # 自动演示期间：提示/撤销置灰
-            dim = pygame.Surface((160, TOP_BAR_HEIGHT), pygame.SRCALPHA)
-            dim.fill((0, 0, 0, 50))
-            self.screen.blit(dim, (398, 0))
+            # 自动演示期间：提示/撤销等置灰
+            dim = pygame.Surface((322, TOP_BAR_HEIGHT - 20), pygame.SRCALPHA)
+            dim.fill((255, 255, 255, 110))
+            self.screen.blit(dim, (470, 10))
 
         self._draw_board()
 
@@ -639,12 +698,22 @@ class Game:
         board = self.session.board
         hover = self.cell_at(pygame.mouse.get_pos()) if self.state == "playing" else None
 
+        # 棋盘外层阴影卡片
+        pad = 14
+        card = pygame.Rect(self.board_x - pad, self.board_y - pad,
+                           board.cols * self.cell + pad * 2,
+                           board.rows * self.cell + pad * 2)
+        draw_card(self.screen, card, radius=16)
+
         for r in range(board.rows):
             for c in range(board.cols):
                 rect = pygame.Rect(self.board_x + c * self.cell,
                                    self.board_y + r * self.cell,
                                    self.cell, self.cell)
-                bg = COLOR_CELL_HOVER if hover == (r, c) else COLOR_CELL
+                if hover == (r, c):
+                    bg = COLOR_CELL_HOVER
+                else:
+                    bg = COLOR_CELL_A if (r + c) % 2 == 0 else COLOR_CELL_B
                 pygame.draw.rect(self.screen, bg, rect)
                 pygame.draw.rect(self.screen, COLOR_GRID_LINE, rect, 1)
 
@@ -655,7 +724,9 @@ class Game:
                 if shake is not None:
                     shake.draw(self.screen, self.cell * 0.62)
                 else:
-                    color = COLOR_ARROW_HOVER if hover == (r, c) else COLOR_ARROW
+                    color = arrow_color(arrow.direction)
+                    if hover == (r, c):
+                        color = lighten(color, 30)
                     draw_arrow(self.screen, *self.cell_center(r, c),
                                self.cell * 0.62, arrow.direction, color)
 
@@ -674,24 +745,28 @@ class Game:
 
     def _draw_result(self, headline: str, is_won: bool) -> None:
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((246, 243, 232, 205))
+        overlay.fill((232, 238, 244, 180))
         self.screen.blit(overlay, (0, 0))
 
-        title = self.font_title.render(headline, True, COLOR_GOLD)
-        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 210)))
+        # 结果卡片
+        draw_card(self.screen, (140, 130, 520, 380), radius=20)
+
+        title_color = COLOR_GOLD if is_won else COLOR_BTN_RED
+        title = self.font_title.render(headline, True, title_color)
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 190)))
 
         if is_won and self.session is not None:
             stars = self.session.stars()
             star_text = "★" * stars + "☆" * (3 - stars)
             star_img = self.font_big.render(star_text, True, COLOR_GOLD)
-            self.screen.blit(star_img, star_img.get_rect(center=(SCREEN_WIDTH // 2, 280)))
+            self.screen.blit(star_img, star_img.get_rect(center=(SCREEN_WIDTH // 2, 260)))
 
             mm, ss = divmod(self.session.elapsed, 60)
             info = self.font_mid.render(
                 f"得分：{self.session.score()}　用时：{mm:02d}:{ss:02d}　"
                 f"失误：{self.session.mistakes}/{self.session.max_mistakes}",
                 True, COLOR_TEXT)
-            self.screen.blit(info, info.get_rect(center=(SCREEN_WIDTH // 2, 340)))
+            self.screen.blit(info, info.get_rect(center=(SCREEN_WIDTH // 2, 320)))
 
             # 历史最佳
             key = str(self.level_index + 1)
@@ -699,7 +774,7 @@ class Game:
             best = data["best"].get(key, 0)
             best_line = self.font_small.render(
                 f"本关历史最高分：{best}", True, COLOR_TEXT)
-            self.screen.blit(best_line, best_line.get_rect(center=(SCREEN_WIDTH // 2, 390)))
+            self.screen.blit(best_line, best_line.get_rect(center=(SCREEN_WIDTH // 2, 370)))
 
             if self.is_random or self.level_index + 1 >= len(LEVELS):
                 self.btn_next.text = "返回开始"
@@ -708,7 +783,7 @@ class Game:
             self.btn_next.draw(self.screen)
         else:
             sub = self.font_mid.render("失误次数已用完，再来一次吧！", True, COLOR_TEXT)
-            self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 310)))
+            self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 290)))
             self.btn_retry.draw(self.screen)
 
     # ---------------- 主循环 ----------------
