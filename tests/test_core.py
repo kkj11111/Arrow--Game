@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """一箭又一箭 —— 核心逻辑自动化测试。
 
-覆盖作业要求的 T01 ~ T06，以及关卡可解性、点击空格等边界情况。
+覆盖作业要求的 T01 ~ T06，以及关卡可解性、点击空格、撤销、计分、
+AI 求解、随机关卡等附加功能。
 运行方式：python -m unittest discover -s tests -v
 """
 
@@ -11,8 +12,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from game_logic import GameSession
-from levels import LEVELS, is_solvable
+from game_logic import Direction, GameSession
+from levels import LEVELS, generate_random_level, is_solvable, solve
 
 
 def arrow_positions(board):
@@ -103,8 +104,65 @@ class TestGameFlow(unittest.TestCase):
         self.assertEqual(restarted.mistakes, 0)
 
 
+class TestUndo(unittest.TestCase):
+    """附加功能：撤销上一步。"""
+
+    def test_undo_fly_restores_arrow(self):
+        session = GameSession(LEVELS[0])
+        init = arrow_positions(session.board)
+        self.assertEqual(session.click(0, 0), "fly")   # 飞出 (0,0)
+        self.assertIsNone(session.board.arrow_at(0, 0))
+        item = session.undo()
+        self.assertEqual(item[0], "fly")
+        self.assertEqual(arrow_positions(session.board), init)  # 箭头放回
+        self.assertFalse(session.finished)
+
+    def test_undo_blocked_restores_mistake(self):
+        session = GameSession(LEVELS[0])
+        self.assertEqual(session.click(1, 1), "blocked")
+        self.assertEqual(session.mistakes, 1)
+        item = session.undo()
+        self.assertEqual(item[0], "blocked")
+        self.assertEqual(session.mistakes, 0)
+
+    def test_undo_empty_returns_none(self):
+        session = GameSession(LEVELS[0])
+        self.assertIsNone(session.undo())
+        self.assertFalse(session.undoable)
+
+
+class TestScoreAndStars(unittest.TestCase):
+    """附加功能：计分与星级。"""
+
+    def test_no_score_before_win(self):
+        session = GameSession(LEVELS[0])
+        self.assertEqual(session.score(), 0)
+        self.assertEqual(session.stars(), 0)
+
+    def test_stars_by_mistakes(self):
+        s0 = GameSession(LEVELS[0])
+        for r, c in [(0, 0), (1, 2), (3, 1)]:
+            s0.click(r, c)
+        s0.click(1, 1)  # 0 失误通关
+        self.assertEqual(s0.stars(), 3)
+        self.assertGreater(s0.score(), 0)
+
+        s1 = GameSession(LEVELS[0])
+        s1.click(1, 1)  # 先撞一次
+        for r, c in [(0, 0), (1, 2), (3, 1), (1, 1)]:
+            s1.click(r, c)
+        self.assertEqual(s1.stars(), 2)
+
+    def test_score_positive_after_win(self):
+        session = GameSession(LEVELS[0])
+        for r, c in [(0, 0), (1, 2), (3, 1), (1, 1)]:
+            session.click(r, c)
+        self.assertTrue(session.won)
+        self.assertGreaterEqual(session.score(), 100)
+
+
 class TestLevels(unittest.TestCase):
-    """关卡质量：至少 3 关且都可解。"""
+    """关卡质量：至少 3 关且都可解；AI 求解与随机关卡。"""
 
     def test_level_count_at_least_three(self):
         self.assertGreaterEqual(len(LEVELS), 3)
@@ -112,6 +170,24 @@ class TestLevels(unittest.TestCase):
     def test_all_levels_solvable(self):
         for i, level in enumerate(LEVELS, 1):
             self.assertTrue(is_solvable(level["grid"]), f"第 {i} 关不可解！")
+
+    def test_solve_returns_winning_order(self):
+        for level in LEVELS:
+            order = solve(level["grid"])
+            self.assertIsNotNone(order)
+            # 按求解顺序模拟点击，应能清空棋盘
+            board = GameSession(level)
+            for r, c in order:
+                self.assertEqual(board.click(r, c), "fly")
+            self.assertTrue(board.won)
+
+    def test_random_level_generated_is_solvable(self):
+        for _ in range(20):
+            level = generate_random_level()
+            self.assertIsNotNone(level)
+            self.assertTrue(is_solvable(level["grid"]))
+            # 随机关卡也可求解
+            self.assertIsNotNone(solve(level["grid"]))
 
 
 class TestMisc(unittest.TestCase):
@@ -123,6 +199,11 @@ class TestMisc(unittest.TestCase):
         session = GameSession(LEVELS[0])
         self.assertIsNone(session.board.arrow_at(-1, 0))
         self.assertIsNone(session.board.arrow_at(99, 99))
+
+    def test_direction_symbols_roundtrip(self):
+        from game_logic import CHAR_FROM_DIRECTION, DIRECTION_FROM_CHAR
+        for d in Direction:
+            self.assertEqual(DIRECTION_FROM_CHAR[CHAR_FROM_DIRECTION[d]], d)
 
 
 if __name__ == "__main__":
