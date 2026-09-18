@@ -6,9 +6,10 @@
     '·'               表示空格
 """
 
-from typing import List
+import random
+from typing import List, Optional
 
-from game_logic import Board
+from game_logic import Board, DIRECTION_FROM_CHAR
 
 
 def is_solvable(grid: List[List[str]]) -> bool:
@@ -32,6 +33,55 @@ def is_solvable(grid: List[List[str]]) -> bool:
         for a in movable:
             board.remove(a)
     return True
+
+
+def solve(grid: List[List[str]]) -> Optional[List[tuple]]:
+    """AI 求解：返回一个可通关的点击顺序 [(row, col), ...]。
+
+    与 is_solvable 同理（贪心模拟），同时记录消除顺序。
+    不可解时返回 None。
+    """
+    board = Board(grid)
+    order: List[tuple] = []
+    while board.remaining() > 0:
+        movable = [
+            a
+            for row in board.grid
+            for a in row
+            if a is not None and board.is_path_clear(a)
+        ]
+        if not movable:
+            return None
+        for a in movable:
+            order.append((a.row, a.col))
+            board.remove(a)
+    return order
+
+
+def generate_random_level(rows: int = 6, cols: int = 5,
+                          arrow_count: int = 7,
+                          max_attempts: int = 300) -> Optional[dict]:
+    """随机生成一个可通关的关卡（附加功能）。
+
+    随机摆放 arrow_count 个四方向箭头，用 is_solvable 验证，
+    直到生成可解的布局（最多尝试 max_attempts 次）。
+    返回与 LEVELS 元素同结构的关卡字典；失败返回 None。
+    """
+    chars = list(DIRECTION_FROM_CHAR.keys())
+    for _ in range(max_attempts):
+        grid = [["·"] * cols for _ in range(rows)]
+        cells = [(r, c) for r in range(rows) for c in range(cols)]
+        random.shuffle(cells)
+        for (r, c) in cells[:arrow_count]:
+            grid[r][c] = random.choice(chars)
+        if is_solvable(grid):
+            return {
+                "name": "随机挑战",
+                "mistakes": 3,
+                "grid": grid,
+                "random": True,
+            }
+    return None
 
 
 LEVELS: List[dict] = [
