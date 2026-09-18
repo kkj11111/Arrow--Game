@@ -8,3 +8,6 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# 本地存档（最高分）
+save.json
