@@ -12,9 +12,10 @@
     其中 '↑↓←→' 表示带方向的箭头，'·' 表示空格。
 """
 
+import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # 方向
@@ -122,12 +123,12 @@ class Board:
 
 
 # ---------------------------------------------------------------------------
-# 会话状态（一局的失误次数 / 胜负），同样与界面无关
+# 会话状态（一局的失误次数 / 胜负 / 计分 / 撤销），同样与界面无关
 # ---------------------------------------------------------------------------
 
 
 class GameSession:
-    """一局的完整状态：关卡 + 失误次数 + 胜负判定。
+    """一局的完整状态：关卡 + 失误次数 + 胜负判定 + 计分 + 撤销历史。
 
     click(row, col) 返回本次点击的结果：
         "fly"     -> 箭头前方畅通，已飞出
@@ -140,7 +141,12 @@ class GameSession:
         self.max_mistakes: int = level["mistakes"]
         self.mistakes: int = 0
         self.board = Board(level["grid"])
+        self.initial_grid: List[List[str]] = [list(row) for row in level["grid"]]
         self.finished: bool = False  # True 表示胜负已定
+        self.start_time: float = time.time()  # 本局开始时间（用于计时）
+        # 操作历史，用于“撤销上一步”。每项为：
+        #   ("fly", (row, col, direction)) 或 ("blocked",)
+        self._history: List[Tuple] = []
 
     @property
     def remaining(self) -> int:
@@ -154,6 +160,15 @@ class GameSession:
     def lost(self) -> bool:
         return self.finished and not self.board.is_cleared()
 
+    @property
+    def elapsed(self) -> int:
+        """本局已用时间（秒）。"""
+        return int(time.time() - self.start_time)
+
+    @property
+    def undoable(self) -> bool:
+        return bool(self._history)
+
     def click(self, row: int, col: int) -> str:
         """玩家点击 (row, col)，返回本次点击的结果字符串。"""
         arrow = self.board.arrow_at(row, col)
@@ -161,10 +176,54 @@ class GameSession:
             return "empty"
         if self.board.is_path_clear(arrow):
             self.board.remove(arrow)
+            self._history.append(("fly", (row, col, arrow.direction)))
             if self.board.is_cleared():
                 self.finished = True
             return "fly"
         self.mistakes += 1
+        self._history.append(("blocked",))
         if self.mistakes >= self.max_mistakes:
             self.finished = True
         return "blocked"
+
+    def undo(self) -> Optional[Tuple]:
+        """撤销上一步操作。
+
+        返回被撤销的步骤：
+            ("fly", (row, col, direction))  放回一枚已飞出的箭头
+            ("blocked",)                    回退一次失误
+        无历史可撤销时返回 None。
+        """
+        if not self._history:
+            return None
+        item = self._history.pop()
+        if item[0] == "fly":
+            _, (r, c, d) = item
+            self.board.grid[r][c] = Arrow(r, c, d)
+        else:
+            self.mistakes = max(0, self.mistakes - 1)
+        self.finished = False  # 撤销后回到进行中状态
+        return item
+
+    # ---------- 计分与星级（附加功能） ----------
+
+    def score(self) -> int:
+        """通关得分。
+
+        规则：基础 100 分 + 剩余失误 × 25 - 用时（秒）× 2，最低 0 分。
+        未通关返回 0。
+        """
+        if not self.won:
+            return 0
+        raw = 100 + (self.max_mistakes - self.mistakes) * 25 - self.elapsed * 2
+        return max(0, raw)
+
+    def stars(self) -> int:
+        """星级评价：0 次失误通关 3 星，1 次 2 星，其余通关 1 星；未通关 0 星。"""
+        if not self.won:
+            return 0
+        if self.mistakes == 0:
+            return 3
+        if self.mistakes == 1:
+            return 2
+        return 1
