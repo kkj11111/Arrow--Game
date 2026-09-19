@@ -144,6 +144,7 @@ class GameSession:
         self.initial_grid: List[List[str]] = [list(row) for row in level["grid"]]
         self.finished: bool = False  # True 表示胜负已定
         self.start_time: float = time.time()  # 本局开始时间（用于计时）
+        self.finish_time: Optional[float] = None  # 胜负已定的时刻；通关/失败后冻结计时
         # 操作历史，用于“撤销上一步”。每项为：
         #   ("fly", (row, col, direction)) 或 ("blocked",)
         self._history: List[Tuple] = []
@@ -162,8 +163,13 @@ class GameSession:
 
     @property
     def elapsed(self) -> int:
-        """本局已用时间（秒）。"""
-        return int(time.time() - self.start_time)
+        """本局已用时间（秒）。
+
+        胜负已定（通关或失败）后时间冻结在 finish_time，避免通关弹窗停留时
+        用时和得分还在随墙钟时间继续变化。
+        """
+        end = self.finish_time if self.finish_time is not None else time.time()
+        return int(end - self.start_time)
 
     @property
     def undoable(self) -> bool:
@@ -179,11 +185,13 @@ class GameSession:
             self._history.append(("fly", (row, col, arrow.direction)))
             if self.board.is_cleared():
                 self.finished = True
+                self.finish_time = time.time()
             return "fly"
         self.mistakes += 1
         self._history.append(("blocked",))
         if self.mistakes >= self.max_mistakes:
             self.finished = True
+            self.finish_time = time.time()
         return "blocked"
 
     def undo(self) -> Optional[Tuple]:
@@ -202,6 +210,12 @@ class GameSession:
             self.board.grid[r][c] = Arrow(r, c, d)
         else:
             self.mistakes = max(0, self.mistakes - 1)
+        # 撤销后回到进行中状态：把冻结的已用时间平移到当前时刻，
+        # 避免 elapsed 从冻结值瞬间跳变。
+        if self.finish_time is not None:
+            used = self.finish_time - self.start_time
+            self.start_time = time.time() - used
+            self.finish_time = None
         self.finished = False  # 撤销后回到进行中状态
         return item
 
