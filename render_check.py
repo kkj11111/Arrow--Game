@@ -69,5 +69,11 @@ game.on_click(game.btn_random.rect.center)
 game.draw()
 pygame.image.save(game.screen, os.path.join(OUT, "08_random.png"))
 
+# 09 选关界面（新功能）
+game.state = "start"
+game.on_click(game.btn_levels.rect.center)
+game.draw()
+pygame.image.save(game.screen, os.path.join(OUT, "09_level_select.png"))
+
 pygame.quit()
 print("截图完成:", sorted(os.listdir(OUT)))

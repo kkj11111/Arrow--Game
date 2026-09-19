@@ -99,6 +99,10 @@ python -m unittest discover -s tests -v
 
 ![随机挑战](screenshots/08_random.png)
 
+选择关卡（按进度解锁）：
+
+![选择关卡](screenshots/09_level_select.png)
+
 ## 项目结构
 
 ```
