@@ -90,9 +90,13 @@ def get_font(size: int) -> pygame.font.Font:
 def load_save() -> dict:
     try:
         with open(SAVE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            data.setdefault("best", {})
+            data.setdefault("stars", {})
+            data.setdefault("unlocked", 1)
+            return data
     except Exception:
-        return {"best": {}, "stars": {}}
+        return {"best": {}, "stars": {}, "unlocked": 1}
 
 
 def save_save(data: dict) -> None:
@@ -348,10 +352,14 @@ class Game:
         self.auto_timer = 0
 
         # 按钮（预创建，矩形位置固定，各功能不同颜色）
-        self.btn_start = Button((SCREEN_WIDTH // 2 - 110, 420, 220, 56),
+        self.btn_start = Button((SCREEN_WIDTH // 2 - 110, 370, 220, 54),
                                 "开始游戏", self.font_mid, bg=COLOR_BTN_BLUE)
-        self.btn_random = Button((SCREEN_WIDTH // 2 - 110, 486, 220, 44),
+        self.btn_levels = Button((SCREEN_WIDTH // 2 - 110, 434, 220, 42),
+                                 "选择关卡", self.font_small, bg=COLOR_BTN_GREEN)
+        self.btn_random = Button((SCREEN_WIDTH // 2 - 110, 486, 220, 42),
                                  "随机挑战", self.font_small, bg=COLOR_BTN_PURPLE)
+        self.btn_back = Button((SCREEN_WIDTH // 2 - 100, 620, 200, 44),
+                               "返回", self.font_small, bg=COLOR_BTN_GRAY)
         self.btn_hint = Button((470, 20, 66, 38), "提示", self.font_tiny,
                                bg=COLOR_BTN_GOLD)
         self.btn_undo = Button((542, 20, 66, 38), "撤销", self.font_tiny,
@@ -360,15 +368,31 @@ class Game:
                                bg=COLOR_BTN_GREEN)
         self.btn_restart = Button((712, 20, 80, 38), "重新开始", self.font_tiny,
                                   bg=COLOR_BTN_RED)
-        self.btn_next = Button((SCREEN_WIDTH // 2 - 100, 440, 200, 56),
+        self.btn_next = Button((210, 440, 180, 54),
                                "下一关", self.font_mid, bg=COLOR_BTN_BLUE)
-        self.btn_retry = Button((SCREEN_WIDTH // 2 - 100, 410, 200, 56),
+        self.btn_retry = Button((210, 440, 180, 54),
                                 "重新开始", self.font_mid, bg=COLOR_BTN_RED)
+        self.btn_levels_result = Button((410, 440, 180, 54),
+                                        "选择关卡", self.font_mid,
+                                        bg=COLOR_BTN_GREEN)
 
         # 棋盘布局（进入关卡时计算）
         self.cell = 88
         self.board_x = 0
         self.board_y = 0
+
+        # 选关界面按钮（3 列 x 2 行）
+        self.level_buttons = []
+        bw, bh, gap = 180, 100, 30
+        start_x = (SCREEN_WIDTH - 3 * bw - 2 * gap) // 2
+        start_y = 160
+        for i in range(len(LEVELS)):
+            col = i % 3
+            row = i // 3
+            rect = (start_x + col * (bw + gap),
+                    start_y + row * (bh + gap), bw, bh)
+            self.level_buttons.append(Button(rect, "", self.font_mid,
+                                             bg=COLOR_BTN_BLUE))
 
         self.running = True
 
@@ -459,8 +483,20 @@ class Game:
         if self.state == "start":
             if self.btn_start.clicked(pos):
                 self.start_level(0)
+            elif self.btn_levels.clicked(pos):
+                self.state = "level_select"
             elif self.btn_random.clicked(pos):
                 self.start_random_level()
+        elif self.state == "level_select":
+            if self.btn_back.clicked(pos):
+                self.state = "start"
+            else:
+                unlocked = self._unlocked_count()
+                for i, btn in enumerate(self.level_buttons):
+                    if btn.clicked(pos):
+                        if i < unlocked:
+                            self.start_level(i)
+                        break
         elif self.state == "playing":
             if self.btn_restart.clicked(pos):
                 self.restart_level()
@@ -475,9 +511,13 @@ class Game:
         elif self.state == "won":
             if self.btn_next.clicked(pos):
                 self.next_level()
+            elif self.btn_levels_result.clicked(pos):
+                self.state = "level_select"
         elif self.state == "lost":
             if self.btn_retry.clicked(pos):
                 self.restart_level()
+            elif self.btn_levels_result.clicked(pos):
+                self.state = "level_select"
 
     def _click_board(self, pos) -> None:
         if self.auto_solving:
@@ -546,8 +586,12 @@ class Game:
         self.auto_timer = 0
         self.auto_solving = True
 
+    def _unlocked_count(self) -> int:
+        """已解锁的关卡数量（从存档读取）。"""
+        return load_save().get("unlocked", 1)
+
     def _save_progress(self) -> None:
-        """通关后保存本关最高分与最高星级（随机挑战不计入）。"""
+        """通关后保存本关最高分、最高星级，并解锁下一关（随机挑战不计入）。"""
         if self.is_random or self.session is None:
             return
         data = load_save()
@@ -557,6 +601,8 @@ class Game:
             data["best"][key] = sc
         if st > data["stars"].get(key, 0):
             data["stars"][key] = st
+        new_unlocked = max(data.get("unlocked", 1), self.level_index + 2)
+        data["unlocked"] = min(new_unlocked, len(LEVELS))
         save_save(data)
 
     # ---------------- 每帧更新 ----------------
@@ -608,10 +654,15 @@ class Game:
         self.screen.blit(self.background, (0, 0))
         if self.state == "start":
             self._draw_start()
+        elif self.state == "level_select":
+            self._draw_level_select()
         elif self.state == "playing":
             self._draw_playing()
         elif self.state == "won":
-            self._draw_result("恭喜通关！", is_won=True)
+            is_last = (not self.is_random
+                       and self.level_index + 1 >= len(LEVELS))
+            self._draw_result("全部通关！" if is_last else "恭喜通关！",
+                              is_won=True)
         elif self.state == "lost":
             self._draw_result("挑战失败！", is_won=False)
         pygame.display.flip()
@@ -619,9 +670,9 @@ class Game:
     def _draw_start(self) -> None:
         # 标题（阴影立体感）
         title = self.font_title.render("一箭又一箭", True, COLOR_SHADOW)
-        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2 + 3, 153)))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2 + 3, 113)))
         title = self.font_title.render("一箭又一箭", True, (58, 66, 92))
-        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 150)))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 110)))
 
         # 装饰箭头（四个方向四种颜色）
         decor = [(SCREEN_WIDTH // 2 - 150, Direction.RIGHT),
@@ -629,25 +680,26 @@ class Game:
                  (SCREEN_WIDTH // 2 + 96, Direction.DOWN),
                  (SCREEN_WIDTH // 2 + 150, Direction.LEFT)]
         for x, d in decor:
-            draw_arrow(self.screen, x, 222, 46, d, arrow_color(d))
+            draw_arrow(self.screen, x, 175, 44, d, arrow_color(d))
 
         sub = self.font_mid.render("点击箭头，让它们依次飞出棋盘！", True, COLOR_TEXT)
-        self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 280)))
+        self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 225)))
 
         # 规则卡片
-        draw_card(self.screen, (120, 310, 560, 128), radius=14)
+        draw_card(self.screen, (120, 252, 560, 108), radius=14)
         rules = [
             "箭头会沿朝向直线飞向棋盘边缘；",
             "前方有其他箭头阻挡时无法飞出，并消耗一次失误（每关 3 次）；",
             "按正确顺序清空全部箭头即可通关，还有三星评价等你挑战！",
         ]
-        y = 340
+        y = 278
         for line in rules:
             text = self.font_small.render(line, True, COLOR_TEXT)
             self.screen.blit(text, text.get_rect(center=(SCREEN_WIDTH // 2, y)))
-            y += 30
+            y += 28
 
         self.btn_start.draw(self.screen)
+        self.btn_levels.draw(self.screen)
         self.btn_random.draw(self.screen)
 
         # 历史成绩（小卡片）
@@ -656,9 +708,52 @@ class Game:
         best = sum(data["best"].values())
         info = self.font_tiny.render(
             f"历史成绩：共 {total_stars} 星 · 最高总分 {best}", True, COLOR_TEXT)
-        info_rect = info.get_rect(center=(SCREEN_WIDTH // 2, 560))
+        info_rect = info.get_rect(center=(SCREEN_WIDTH // 2, 585))
         draw_card(self.screen, info_rect.inflate(44, 18), radius=10)
         self.screen.blit(info, info_rect)
+
+    def _draw_level_select(self) -> None:
+        # 标题
+        title = self.font_title.render("选择关卡", True, (58, 66, 92))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 90)))
+
+        data = load_save()
+        unlocked = self._unlocked_count()
+
+        for i, btn in enumerate(self.level_buttons):
+            is_unlocked = i < unlocked
+            stars = data["stars"].get(str(i + 1), 0)
+            star_line = "★" * stars + "☆" * (3 - stars)
+
+            if is_unlocked:
+                # 已解锁：蓝色按钮，上关卡号，下星级
+                hover = btn.rect.collidepoint(pygame.mouse.get_pos())
+                bg = lighten(COLOR_BTN_BLUE, 26) if hover else COLOR_BTN_BLUE
+                pygame.draw.rect(self.screen, bg, btn.rect, border_radius=10)
+                pygame.draw.rect(self.screen, (255, 255, 255), btn.rect, 2,
+                                 border_radius=10)
+                num = self.font_big.render(f"第 {i + 1} 关", True,
+                                           COLOR_TEXT_LIGHT)
+                self.screen.blit(num, num.get_rect(
+                    center=(btn.rect.centerx, btn.rect.y + 38)))
+                star_img = self.font_small.render(star_line, True, COLOR_GOLD)
+                self.screen.blit(star_img, star_img.get_rect(
+                    center=(btn.rect.centerx, btn.rect.y + 72)))
+            else:
+                # 未解锁：灰色卡片 + 锁图标 + 提示
+                pygame.draw.rect(self.screen, (224, 228, 234), btn.rect,
+                                 border_radius=10)
+                pygame.draw.rect(self.screen, (180, 186, 194), btn.rect, 2,
+                                 border_radius=10)
+                lock = self.font_big.render("🔒", True, (130, 136, 144))
+                self.screen.blit(lock, lock.get_rect(
+                    center=(btn.rect.centerx, btn.rect.y + 36)))
+                nxt = self.font_tiny.render("通关前一关解锁", True,
+                                            (130, 136, 144))
+                self.screen.blit(nxt, nxt.get_rect(
+                    center=(btn.rect.centerx, btn.rect.y + 76)))
+
+        self.btn_back.draw(self.screen)
 
     def _draw_playing(self) -> None:
         session = self.session
@@ -776,15 +871,19 @@ class Game:
                 f"本关历史最高分：{best}", True, COLOR_TEXT)
             self.screen.blit(best_line, best_line.get_rect(center=(SCREEN_WIDTH // 2, 370)))
 
-            if self.is_random or self.level_index + 1 >= len(LEVELS):
+            if self.is_random:
+                self.btn_next.text = "返回开始"
+            elif self.level_index + 1 >= len(LEVELS):
                 self.btn_next.text = "返回开始"
             else:
                 self.btn_next.text = "下一关"
             self.btn_next.draw(self.screen)
+            self.btn_levels_result.draw(self.screen)
         else:
             sub = self.font_mid.render("失误次数已用完，再来一次吧！", True, COLOR_TEXT)
-            self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 290)))
+            self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 310)))
             self.btn_retry.draw(self.screen)
+            self.btn_levels_result.draw(self.screen)
 
     # ---------------- 主循环 ----------------
 
